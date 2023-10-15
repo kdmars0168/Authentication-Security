@@ -3,7 +3,7 @@ import 'dotenv/config'
 import express from "express";
 import bodyParser from "body-parser";
 import mongoose from "mongoose";
-import md5 from "md5";
+import bcrypt from "bcrypt";
 
 // Create an express app
 const app = express();
@@ -63,30 +63,44 @@ app.get("/register", async (req, res) => {
 });
 
 //Define Post route for register
-app.post("/register",async (req, res) => {
+app.post("/register", async (req, res) => {
   try {
+    const { username, password } = req.body;
+
+    // Hash the password using bcrypt with salt rounds of 10
+    const hashedPassword = await bcrypt.hash(password, 10);
+
     const newUser = new User({
-      email: req.body.username,
-      password: md5(req.body.password)
+      email: username,
+      password: hashedPassword
     });
 
-    await newUser.save().then(() => {
-      res.render("secrets");
-    });
+    await newUser.save();
+    
+    console.log("User registered successfully.");
+    res.render("secrets");
   } catch (error) {
-    res.status(500).send("Internal Server Error");
+    console.error('Error during registration:', error.message);
+    res.status(500).send('Internal Server Error');
   }
 });
 
 //Define Post route for login
-app.post("/login", async(req,res)=>{ 
+app.post("/login", async (req, res) => {
   try {
     const { username, password } = req.body;
 
-    User.findOne({ email: username }).then(result => {
-      if (result && md5(password) === result.password) {
-        console.log('User logged in successfully.');
-        res.render('secrets');
+    User.findOne({ email: username }).then(async result => {
+      if (result) {
+        // Compare the provided password with the hashed password from the database
+        const passwordMatch = await bcrypt.compare(password, result.password);
+
+        if (passwordMatch) {
+          console.log('User logged in successfully.');
+          res.render('secrets');
+        } else {
+          res.status(401).send('Invalid username or password');
+        }
       } else {
         res.status(401).send('Invalid username or password');
       }
@@ -99,7 +113,6 @@ app.post("/login", async(req,res)=>{
     res.status(500).send('Internal Server Error');
   }
 });
-
 
 // Start the server and listen on port 3000
 app.listen(3000, async () => {
