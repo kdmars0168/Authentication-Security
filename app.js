@@ -3,15 +3,30 @@ import 'dotenv/config'
 import express from "express";
 import bodyParser from "body-parser";
 import mongoose from "mongoose";
-import bcrypt from "bcrypt";
+import session from "express-session";
+import passport from "passport";
+import passportLocalMongoose from "passport-local-mongoose";
 
 // Create an express app
 const app = express();
+
 // Parse URL-encoded data using the built-in middleware
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static('public'));
+
 // Set the view engine to EJS
 app.set('view engine', 'ejs');
+
+// Enable sessions
+app.use(session({
+  secret: "Our little secret.",
+  resave: false,
+  saveUninitialized: false
+}));
+
+// Initialize passport
+app.use(passport.initialize());
+app.use(passport.session());
 
 // Connect to MongoDB
 mongoose.connect("mongodb://127.0.0.1:27017/userDB", { useNewUrlParser: true, useUnifiedTopology: true })
@@ -30,10 +45,18 @@ const userSchema = new mongoose.Schema({
   password: String
 });
 
-
+// Add passport-local-mongoose plugin
+userSchema.plugin(passportLocalMongoose);
 
 // Create mongoose model for user schema
 const User = mongoose.model("User", userSchema);
+
+// Configure passport to use the local strategy
+passport.use(User.createStrategy());
+
+// Serialize and deserialize user for session management
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 
 // Define a route for the home page
 app.get("/", async (req, res) => {
@@ -62,57 +85,59 @@ app.get("/register", async (req, res) => {
   }
 });
 
-//Define Post route for register
-app.post("/register", async (req, res) => {
-  try {
-    const { username, password } = req.body;
-
-    // Hash the password using bcrypt with salt rounds of 10
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const newUser = new User({
-      email: username,
-      password: hashedPassword
-    });
-
-    await newUser.save();
-    
-    console.log("User registered successfully.");
+// Define a route for the secrets page
+app.get("/secrets", (req, res) => {
+  if (req.isAuthenticated()) {
     res.render("secrets");
-  } catch (error) {
-    console.error('Error during registration:', error.message);
-    res.status(500).send('Internal Server Error');
+  } else {
+    res.redirect("/login");
   }
+});
+
+// Define a route for logout
+app.get("/logout", (req, res) => {
+  req.logout((err) => {
+    if (err) {
+      console.error("Error during logout:", err);
+      res.status(500).send("Internal Server Error");
+    } else {
+      res.redirect("/");
+    }
+  });
+});
+
+//Define Post route for register
+app.post("/register", (req, res) => {
+  const { username, password } = req.body;
+
+  // Attempt to register a new user
+  User.register(new User({ username: username }), password, (err, user) => {
+    if (err) {
+      // Handle registration errors
+      console.error("Error during registration:", err);
+
+      if (err.name === "UserExistsError") {
+        // Email already exists, provide a user-friendly response
+        res.status(400).send("Email already exists. Please choose a different email.");
+      } else {
+        // Other errors, respond with a generic error message
+        res.status(500).send("Internal Server Error");
+      }
+    } else {
+      // Registration successful, authenticate and redirect
+      passport.authenticate("local")(req, res, () => {
+        res.redirect("/secrets");
+      });
+    }
+  });
 });
 
 //Define Post route for login
-app.post("/login", async (req, res) => {
-  try {
-    const { username, password } = req.body;
+app.post("/login", passport.authenticate("local", {
+  successRedirect: "/secrets",
+  failureRedirect: "/login"
+}));
 
-    User.findOne({ email: username }).then(async result => {
-      if (result) {
-        // Compare the provided password with the hashed password from the database
-        const passwordMatch = await bcrypt.compare(password, result.password);
-
-        if (passwordMatch) {
-          console.log('User logged in successfully.');
-          res.render('secrets');
-        } else {
-          res.status(401).send('Invalid username or password');
-        }
-      } else {
-        res.status(401).send('Invalid username or password');
-      }
-    }).catch(err => {
-      console.log(err);
-      res.status(500).send('Internal Server Error');
-    });
-  } catch (error) {
-    console.error('Error during login:', error);
-    res.status(500).send('Internal Server Error');
-  }
-});
 
 // Start the server and listen on port 3000
 app.listen(3000, async () => {
