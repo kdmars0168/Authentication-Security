@@ -1,5 +1,5 @@
 //importing neccesary modules
-
+import 'dotenv/config'
 import express from "express";
 import bodyParser from "body-parser";
 import mongoose from "mongoose";
@@ -31,9 +31,7 @@ const userSchema = new mongoose.Schema({
 });
 
 //secret plugin
-const secret = "Thisisourlittlesecret.";
-userSchema.plugin(encrypt, { secret: secret, encryptedFields:["password"] });
-
+userSchema.plugin(encrypt, { secret: process.env.SECRET, encryptedFields:["password"] });
 
 // Create mongoose model for user schema
 const User = mongoose.model("User", userSchema);
